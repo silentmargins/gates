@@ -1,0 +1,5 @@
+Inc16(in=in, out=incout);
+Mux16(a=outint, b=incout, sel=inc,out=incornot)
+Mux16(a=in, b=incornot, sel=load, out=loadornot);
+Mux16(a=loadornot, b[0..15]=false, sel=reset, out=resetout);
+Register(in=resetout, load=true,out=out, out=outint);
