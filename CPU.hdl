@@ -1,0 +1,80 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Central Processing unit (CPU).
+ * Consists of an ALU and a set of registers, designed to fetch and 
+ * execute instructions written in the Hack machine language.
+ * In particular, the ALU executes the inputted instruction according
+ * to the Hack machine language specification, as follows. 
+ * The D and A in the language specification refer to CPU-resident registers,
+ * while M refers to the memory register addressed by A, i.e. to Memory[A].
+ * The inM input holds the value of this register. If the current instruction 
+ * needs to write a value to M, the value is placed in outM, the address 
+ * of the target register is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM=0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time unit. If reset == 1, then the 
+ * CPU jumps to address 0 (i.e. sets pc = 0 in next time unit) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current program
+                         // (reset == 1) or continue executing the current
+                         // program (reset == 0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write into M? 
+        addressM[15],    // RAM address (of M)
+        pc[15];          // ROM address (of next instruction)
+
+    PARTS:
+    // get type of instruction
+    Not(in=instruction[15], out=Ainstruction); // 1, if A instruction
+    Not(in=Ainstruction, out=Cinstruction); // 1, if C instruction
+    
+	//select which value to input to A register, A instruction or ALU output triggered by C instruction
+    And(a=Cinstruction, b=instruction[5], out=ALUtoA);    // if C-inst AND dest bit is ARegister, 1-bit output  
+    Mux16(a=instruction, b=ALUout, sel=ALUtoA, out=Aregin); // 16-bit output to ARegister, instruction A value to Aregister, otherwise result of C instruction(i.e. ALU output)
+    
+	// get load bit
+    Or(a=Ainstruction, b=ALUtoA, out=loadA);  // 1-bit, load A if A-instruction OR C-instruction, if destination to to ARegister
+    ARegister(in=Aregin, load=loadA, out=Aout); // loading alu output, 16-bit output
+    
+    Mux16(a=Aout, b=inM, sel=instruction[12], out=AMout);   // 16-bit, select A OR M based on a-bit (instruction[12])
+
+    And(a=Cinstruction, b=instruction[4], out=loadD); // 1-bit, DRegister
+    DRegister(in=ALUout, load=loadD, out=Dout);    // load the D register from ALU output, 16-bit
+    
+	// 6 control bits from C instruction
+    ALU(x=Dout, y=AMout, zx=instruction[11], nx=instruction[10], 
+        zy=instruction[9], ny=instruction[8], f=instruction[7],
+        no=instruction[6], out=ALUout, zr=ZRout, ng=NGout); // calculate some operation upon D and A|M
+        
+    // Set outputs for writing memory
+    Or16(a=false, b=Aout, out[0..14]=addressM); // getting A register output and setting ir to memory address, usualy it comes from A instruction, but sometimes, like in fill.asm A=M << C instruction
+    Or16(a=false, b=ALUout, out=outM); // value to write to addressM
+    And(a=Cinstruction, b=instruction[3], out=writeM); // write to memory?, get write bit
+	
+    
+    // calc PCload & PCinc - whether to load PC with A reg. six jump variants..jump ir C instruction ALU output equals\less\more
+    And(a=ZRout, b=instruction[1], out=jeq);    // =0 is zero and jump if zero, zr -- true if out=0
+    And(a=NGout, b=instruction[2], out=jlt);    // <0 is neg and jump if neg, ng -- true if out<0
+    Or(a=ZRout, b=NGout, out=zeroOrNeg);		// zero or negative
+    Not(in=zeroOrNeg, out=positive);            
+    And(a=positive, b=instruction[0], out=jgt); // >0 is positive and jump if positive
+    Or(a=jeq, b=jlt, out=jle);					// <=0
+    Or(a=jle, b=jgt, out=jumpToA);              // load another address to PC only if conditions are met and jump if conditions are met
+    And(a=Cinstruction, b=jumpToA, out=PCload); // Only jump if C instruction
+    Not(in=PCload, out=PCinc);                  // only inc if not load
+    PC(in=Aout, inc=PCinc, load=PCload, reset=reset, out[0..14]=pc); // get an Aregister value initially 
+}
